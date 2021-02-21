@@ -34,9 +34,10 @@ def check_valid_ip(ip):
 
 
 def is_valid_port(port_entered):
-    if not port_entered.isdigit():
-        return False
-    port_entered = int(port_entered)
+    try:
+        port_entered = int(port_entered)
+    except ValueError:
+        print("Oops! Port should be a numerical value!")
     return 65354 > port_entered >= 0
 
 
@@ -45,7 +46,7 @@ def is_valid_port(port_entered):
 def check_if_host_is_up(ip):
     try:
         print("Setting up ping.")
-        ping = sr1(IP(dst=ip)/ICMP(), timeout=10, iface="eth0")
+        ping = sr1(IP(dst=ip)/ICMP(), timeout=10, iface="eth0", verbose=False)
         print("Ping successful! Beginning scan...")
     except Exception as e:
         print("Couldn't ping! Exiting...")
@@ -71,9 +72,9 @@ def scan_port(port, ip):
     conf.verb = 0
     # The sr1 command is how we will send our SYN packet (using the S flag), and we hope to receive a SYNACK back
     # If we do, the destination port is open
-    synack_packet = sr1(IP(dst=ip) / TCP(sport=source_port, dport=port, flags="S"))
+    synack_packet = sr1(IP(dst=ip) / TCP(sport=int(source_port), dport=int(port), flags="S"))
     received_flags = synack_packet.getlayer(TCP).flags
-    send_rst_packet(source_port, port, ip)
+    send_rst_packet(int(source_port), int(port), ip)
     if synack_received(received_flags):
         return True
     else:
@@ -89,10 +90,13 @@ def conclude_scan(start_clock):
 def scan_single_port(port, ip):
     check_if_host_is_up(ip)
     start_clock = datetime.now()
-    # return
     port_open = scan_port(port, ip)
+    at_least_one_port_open = False
     if port_open:
-        print("Port " + str(port) + " is open")
+      print("Port " + str(port) + " is open")
+      at_least_one_port_open = True
+    if not at_least_one_port_open:
+        print("No open ports found!")
     conclude_scan(start_clock)
 
 
@@ -100,10 +104,14 @@ def scan_ports_list(ports_list, ip):
     check_if_host_is_up(ip)
     start_clock = datetime.now()
     print("Beginning scan...")
+    at_least_one_port_open = False
     for port in ports_list:
         port_open = scan_port(port, ip)
         if port_open:
             print("Port " + str(port) + " is open")
+            at_least_one_port_open = True
+    if not at_least_one_port_open:
+        print("No open ports found!")
     conclude_scan(start_clock)
 
 def scan_range_of_ports(min_port, max_port, ip):
@@ -112,10 +120,14 @@ def scan_range_of_ports(min_port, max_port, ip):
     ports_list = range(int(min_port), int(max_port) + 1)
     start_clock = datetime.now()
     print("Beginning scan...")
+    at_least_one_port_open = False
     for port in ports_list:
         port_open = scan_port(port, ip)
         if port_open:
             print("Port " + str(port) + " is open")
+            at_least_one_port_open = True
+    if not at_least_one_port_open:
+        print("No open ports found!")
     conclude_scan(start_clock)
 
 
@@ -155,7 +167,7 @@ def get_user_input():
                     ok_port_entered = True
                     scan_single_port(port_entered, ip_address)
             elif port_option == "m":
-                ports_entered = input("Enter ports separated by a comma")
+                ports_entered = input("Enter ports separated by a comma: ")
                 ports_list = ports_entered.split(",")
                 # Set it to true unless one of our ports is invalid
                 ok_port_entered = True
@@ -163,7 +175,7 @@ def get_user_input():
                     if not is_valid_port(port):
                         ok_port_entered = False
                 if ok_port_entered:
-                    scan_ports_list(ports_list)
+                    scan_ports_list(ports_list, ip_address)
             elif port_option == "p":
                 min_port = input("Enter minimum port number: ")
                 max_port = input("Enter maximum port number: ")
