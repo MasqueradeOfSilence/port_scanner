@@ -16,20 +16,26 @@ from scapy.layers.inet import IP
 from scapy.volatile import RandShort
 
 
-def check_valid_ip(ip):
-    ip = ip.split(".")
-    if len(ip) > 4:
-        # We will not be handling IPv6 in this program
-        print("Oops! IPv4 is too long. Please try again.")
-        return False
-    elif len(ip) < 4:
-        print("Oops! IPv4 is too short. Please try again.")
-        return False
-    for i in range(0, len(ip)):
-        current = ip[i]
-        if int(current) < 0 or int(current) > 255:
-            print("Oops! One or more of your IP numbers is out of range. Please try again.")
+def check_valid_ip(ip_list):
+    for ip in ip_list:
+        ip = ip.split(".")
+        if len(ip) > 4:
+            # We will not be handling IPv6 in this program
+            print("Oops! IPv4 is too long. Please try again.")
             return False
+        elif len(ip) < 4:
+            print("Oops! IPv4 is too short or contains invalid characters. Please try again.")
+            return False
+        for i in range(0, len(ip)):
+            current = ip[i]
+            try:
+                test = int(current)
+            except ValueError:
+                print("Non-integer value detected!")
+                return False
+            if int(current) < 0 or int(current) > 255:
+                print("Oops! One or more of your IP numbers is out of range. Please try again.")
+                return False
     return True
 
 
@@ -45,7 +51,7 @@ def is_valid_port(port_entered):
 # Must run PyCharm as administrator to ensure this works
 def check_if_host_is_up(ip):
     try:
-        print("Setting up ping.")
+        print("Setting up ping for IP " + ip + ".")
         ping = sr1(IP(dst=ip)/ICMP(), timeout=10, iface="eth0", verbose=False)
         print("Ping successful! Beginning scan...")
     except Exception as e:
@@ -90,28 +96,29 @@ def conclude_scan(start_clock):
 def scan_single_port(port, ip):
     check_if_host_is_up(ip)
     start_clock = datetime.now()
+    print("Beginning scan for " + ip + "...")
     port_open = scan_port(port, ip)
     at_least_one_port_open = False
     if port_open:
-      print("Port " + str(port) + " is open")
+      print("Port " + str(port) + " is open on " + ip)
       at_least_one_port_open = True
     if not at_least_one_port_open:
-        print("No open ports found!")
+        print("No open ports found on " + ip + "!")
     conclude_scan(start_clock)
 
 
 def scan_ports_list(ports_list, ip):
     check_if_host_is_up(ip)
     start_clock = datetime.now()
-    print("Beginning scan...")
+    print("Beginning scan for " + ip + "...")
     at_least_one_port_open = False
     for port in ports_list:
         port_open = scan_port(port, ip)
         if port_open:
-            print("Port " + str(port) + " is open")
+            print("Port " + str(port) + " is open on " + ip)
             at_least_one_port_open = True
     if not at_least_one_port_open:
-        print("No open ports found!")
+        print("No open ports found on " + i + "!")
     conclude_scan(start_clock)
 
 def scan_range_of_ports(min_port, max_port, ip):
@@ -119,15 +126,15 @@ def scan_range_of_ports(min_port, max_port, ip):
     # Include the max_port with +1
     ports_list = range(int(min_port), int(max_port) + 1)
     start_clock = datetime.now()
-    print("Beginning scan...")
+    print("Beginning scan for " + ip + "...")
     at_least_one_port_open = False
     for port in ports_list:
         port_open = scan_port(port, ip)
         if port_open:
-            print("Port " + str(port) + " is open")
+            print("Port " + str(port) + " is open on " + ip)
             at_least_one_port_open = True
     if not at_least_one_port_open:
-        print("No open ports found!")
+        print("No open ports found on " + ip + "!")
     conclude_scan(start_clock)
 
 
@@ -136,10 +143,11 @@ def get_user_input():
     try:
         valid_ip = False
         # Just using gateway as default: this will be overwritten
-        ip_address = "192.168.1.1"
+        ip_addresses = ["192.168.1.1"]
         while not valid_ip:
-            ip_address = input("Enter IPv4 Address you want to scan: ")
-            valid_ip = check_valid_ip(ip_address)
+            ip_addresses = input("Enter comma-separated list of IPv4 Addresses that you want to scan: ")
+            ip_addresses = ip_addresses.split(",")
+            valid_ip = check_valid_ip(ip_addresses)
         # Single port, port range, multiple ports
         valid_option = False
         port_option = "Default"
@@ -165,7 +173,9 @@ def get_user_input():
                 # Check for valid ports
                 if is_valid_port(port_entered):
                     ok_port_entered = True
-                    scan_single_port(port_entered, ip_address)
+                    for ip_address in ip_addresses:
+                        ip_address = ip_address.strip()
+                        scan_single_port(port_entered, ip_address)
             elif port_option == "m":
                 ports_entered = input("Enter ports separated by a comma: ")
                 ports_list = ports_entered.split(",")
@@ -175,14 +185,18 @@ def get_user_input():
                     if not is_valid_port(port):
                         ok_port_entered = False
                 if ok_port_entered:
-                    scan_ports_list(ports_list, ip_address)
+                    for ip_address in ip_addresses:
+                        ip_address = ip_address.strip()
+                        scan_ports_list(ports_list, ip_address)
             elif port_option == "p":
                 min_port = input("Enter minimum port number: ")
                 max_port = input("Enter maximum port number: ")
                 if min_port.isdigit() and max_port.isdigit() and is_valid_port(min_port) and is_valid_port(
                         max_port) and int(min_port) < int(max_port):
                     ok_port_entered = True
-                    scan_range_of_ports(min_port, max_port, ip_address)
+                    for ip_address in ip_addresses:
+                        ip_address = ip_address.strip()
+                        scan_range_of_ports(min_port, max_port, ip_address)
 
             if not ok_port_entered:
                 print("Invalid port(s)! Please try again.")
