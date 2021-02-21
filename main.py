@@ -1,3 +1,5 @@
+#!/usr/bin/sudo python
+
 import traceback
 
 import scapy
@@ -42,7 +44,8 @@ def is_valid_port(port_entered):
 # Must run PyCharm as administrator to ensure this works
 def check_if_host_is_up(ip):
     try:
-        ping = sr1(IP(dst=ip)/ICMP(), verbose=False)
+        print("Setting up ping.")
+        ping = sr1(IP(dst=ip)/ICMP(), timeout=10, iface="eth0")
         print("Ping successful! Beginning scan...")
     except Exception as e:
         print("Couldn't ping! Exiting...")
@@ -86,6 +89,7 @@ def conclude_scan(start_clock):
 def scan_single_port(port, ip):
     check_if_host_is_up(ip)
     start_clock = datetime.now()
+    # return
     port_open = scan_port(port, ip)
     if port_open:
         print("Port " + str(port) + " is open")
