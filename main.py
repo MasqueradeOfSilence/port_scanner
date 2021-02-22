@@ -28,6 +28,9 @@ def check_valid_ip(ip_list):
             return False
         for i in range(0, len(ip)):
             current = ip[i]
+            if "/" in current:
+                temp = current.split("/")
+                current = temp[0]
             try:
                 test = int(current)
             except ValueError:
@@ -47,12 +50,60 @@ def is_valid_port(port_entered):
     return 65354 > port_entered >= 0
 
 
+# Note: Subnet mask must be written in 255... form
+def compute_host_range(ip, subnet_mask):
+    ip_list = [ip, subnet_mask]
+    if not check_valid_ip(ip_list):
+        print("Error: invalid IP entered")
+        sys.exit(1)
+    subnet_numbers = subnet_mask.split(".")
+    magic_number = 255
+    magic_index = 0
+    # Find the first number that isn't 255
+    for index, number in enumerate(subnet_numbers):
+        try:
+            number = int(number)
+        except ValueError:
+            print("Subnet must be a number!")
+            sys.exit(1)
+        if number < 255:
+            print("Here is number: " + str(number))
+            magic_number = abs(number - 256)
+            print("index: " + str(index))
+            magic_index = index
+            break
+    split_ip = ip.split(".")
+    result = int(split_ip[magic_index]) // magic_number
+    result2 = int(result * magic_number)
+    octet = result2 + magic_number - 1
+    min_ip = "192.168.1.1"
+    max_ip = "192.168.1.1"
+    if magic_index == 2:
+        min_ip = split_ip[0] + "." + split_ip[1] + "." + str(result2) + ".0"
+        max_ip = split_ip[0] + "." + split_ip[1] + "." + str(octet) + ".255"
+    elif magic_index == 3:
+        min_ip = split_ip[0] + "." + split_ip[1] + "." + split_ip[2] + "." + str(result2)
+        max_ip = split_ip[0] + "." + split_ip[1] + "." + split_ip[2] + "." + str(octet)
+    elif magic_index == 1:
+        min_ip = split_ip[0] + "." + str(result2) + "." + split_ip[2] + "." + split_ip[3]
+        max_ip = split_ip[0] + "." + str(octet) + "." + split_ip[2] + "." + split_ip[3]
+    elif magic_index == 0:
+        min_ip = str(result2) + "." + split_ip[1] + "." + split_ip[2] + "." + split_ip[3]
+        max_ip = str(octet) + "." + split_ip[1] + "." + split_ip[2] + "." + split_ip[3]
+    else:
+        print("Oops, something went wrong! Exiting...")
+        sys.exit(1)
+    print("Min IP: " + min_ip)
+    print("Max IP: " + max_ip)
+    return min_ip, max_ip
+
+
 # Try to ping with a single packet to make sure that the target is up
 # Must run PyCharm as administrator to ensure this works
 def check_if_host_is_up(ip):
     try:
         print("Setting up ping for IP " + ip + ".")
-        ping = sr1(IP(dst=ip)/ICMP(), timeout=10, iface="eth0", verbose=False)
+        ping = sr1(IP(dst=ip) / ICMP(), timeout=10, iface="eth0", verbose=False)
         print("Ping successful! Beginning scan...")
     except Exception as e:
         print("Couldn't ping! Exiting...")
@@ -68,7 +119,7 @@ def synack_received(flags):
 
 # Sending the RST packet will terminate our connection as soon as we've gotten what we need.
 def send_rst_packet(source_port, dest_port, ip):
-    rst_packet = IP(dst=ip)/TCP(sport=source_port, dport=dest_port, flags="R")
+    rst_packet = IP(dst=ip) / TCP(sport=source_port, dport=dest_port, flags="R")
     send(rst_packet)
 
 
@@ -100,8 +151,8 @@ def scan_single_port(port, ip):
     port_open = scan_port(port, ip)
     at_least_one_port_open = False
     if port_open:
-      print("Port " + str(port) + " is open on " + ip)
-      at_least_one_port_open = True
+        print("Port " + str(port) + " is open on " + ip)
+        at_least_one_port_open = True
     if not at_least_one_port_open:
         print("No open ports found on " + ip + "!")
     conclude_scan(start_clock)
@@ -118,8 +169,9 @@ def scan_ports_list(ports_list, ip):
             print("Port " + str(port) + " is open on " + ip)
             at_least_one_port_open = True
     if not at_least_one_port_open:
-        print("No open ports found on " + i + "!")
+        print("No open ports found on " + ip + "!")
     conclude_scan(start_clock)
+
 
 def scan_range_of_ports(min_port, max_port, ip):
     check_if_host_is_up(ip)
@@ -145,9 +197,33 @@ def get_user_input():
         # Just using gateway as default: this will be overwritten
         ip_addresses = ["192.168.1.1"]
         while not valid_ip:
-            ip_addresses = input("Enter comma-separated list of IPv4 Addresses that you want to scan: ")
-            ip_addresses = ip_addresses.split(",")
-            valid_ip = check_valid_ip(ip_addresses)
+            ip_addresses = input(
+                "Enter comma-separated list of IPv4 Addresses that you want to scan, or a .txt file separated by "
+                "newlines, or s for subnet mask option with 255 prefix (for CIDR notation, just enter IP/number): ")
+            if ip_addresses.lower() == "s":
+                ip = input("Enter IP: ")
+                subnet_mask = input("Enter subnet in 255.x.x.x form only: ")
+                min_ip, max_ip = compute_host_range(ip, subnet_mask)
+                # Insert everything from min_ip to max_ip into ip_addresses
+                ip_addresses = [min_ip + "-" + max_ip]
+                temp_addresses = [min_ip, max_ip]
+                valid_ip = check_valid_ip(temp_addresses)
+            elif ".txt" in ip_addresses:
+                new_ips = []
+                print("Reading from file" + ip_addresses + "...")
+                try:
+                    file = open(ip_addresses, "r")
+                    for line in file:
+                        # Ignore whitespace
+                        if line.strip():
+                            new_ips.append(line)
+                    ip_addresses = new_ips
+                    valid_ip = check_valid_ip(ip_addresses)
+                except FileNotFoundError:
+                    print("Oops! File not found! Please try again!")
+            else:
+                ip_addresses = ip_addresses.split(",")
+                valid_ip = check_valid_ip(ip_addresses)
         # Single port, port range, multiple ports
         valid_option = False
         port_option = "Default"
