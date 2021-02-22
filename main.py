@@ -173,28 +173,38 @@ def scan_range_of_ports(min_port, max_port, ip):
 
 
 def gui_input():
+    global final_report_string
+    final_report_string += "<h1>Summary of Port Scan</h1>\n"
     print("GUI option selected! Launching GUI!")
     layout = [[sg.Text("Enter the IP address and port(s)! Can also add subnet in CIDR notation")],
               [sg.Text("IPs (Comma-Separated List)", size=(25, 1)), sg.InputText()],
               [sg.Text("Ports (Comma-Separated List)", size=(25, 1)), sg.InputText()],
               [sg.Checkbox("Run traceroute", default=True)],
-              [sg.Text("Optional: choose a file with newline-separated list of IPs"), sg.FileBrowse()],
+              [sg.Text("Optional: choose a .txt file with newline-separated list of IPs", key="BROWSE"), sg.FileBrowse(key="-IN-")],
               [sg.Button("SCAN")]]
     window = sg.Window("Port Scanner", layout)
     while True:
         event, values = window.read()
         # Scan logic
+        if event == "BROWSE":
+            print("Browsing event")
         if event == "SCAN":
             ip_addresses = values[0]
             ports_list = values[1]
             should_run_traceroute = values[2]
-            if len(values) > 3 and 3 in values:
-                ip_file = values[3]
-                if path.exists(ip_file):
-                    read_file = ip_file.Read()
-                    for line in read_file:
-                        print("Line: " + line)
             ip_addresses = ip_addresses.split(", ")
+            specified_file = values["-IN-"]
+            if specified_file != "":
+                print("Scanning the following file for IP addresses: ")
+                print(specified_file)
+                try:
+                    f = open(specified_file, "r")
+                    for line in f:
+                        if line.strip():
+                            ip_addresses.append(line)
+                except FileNotFoundError:
+                    sg.Popup("Invalid file! Exiting...")
+                    break
             are_ips_valid = check_valid_ip(ip_addresses)
             if not are_ips_valid:
                 sg.Popup("Oops! Invalid IPs! Please try again!")
