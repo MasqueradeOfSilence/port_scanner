@@ -1,5 +1,7 @@
 #!/usr/bin/sudo python
 
+# Github repo: https://github.com/MasqueradeOfSilence/port_scanner
+
 import traceback
 
 import scapy
@@ -10,7 +12,6 @@ from time import strftime
 from logging import getLogger, ERROR
 from os import path
 
-# Thanks, PyCharm.
 from scapy.config import conf
 from scapy.layers.inet import ICMP, TCP, UDP, traceroute
 from scapy.sendrecv import sr1, send
