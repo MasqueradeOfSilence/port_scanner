@@ -4,16 +4,20 @@ import traceback
 
 import scapy
 import sys
+import PySimpleGUI as sg
 from datetime import datetime
 from time import strftime
 from logging import getLogger, ERROR
+from os import path
 
 # Thanks, PyCharm.
 from scapy.config import conf
-from scapy.layers.inet import ICMP, TCP
+from scapy.layers.inet import ICMP, TCP, UDP, traceroute
 from scapy.sendrecv import sr1, send
 from scapy.layers.inet import IP
 from scapy.volatile import RandShort
+
+final_report_string = ""
 
 
 def check_valid_ip(ip_list):
@@ -50,54 +54,6 @@ def is_valid_port(port_entered):
     return 65354 > port_entered >= 0
 
 
-# Note: Subnet mask must be written in 255... form
-def compute_host_range(ip, subnet_mask):
-    ip_list = [ip, subnet_mask]
-    if not check_valid_ip(ip_list):
-        print("Error: invalid IP entered")
-        sys.exit(1)
-    subnet_numbers = subnet_mask.split(".")
-    magic_number = 255
-    magic_index = 0
-    # Find the first number that isn't 255
-    for index, number in enumerate(subnet_numbers):
-        try:
-            number = int(number)
-        except ValueError:
-            print("Subnet must be a number!")
-            sys.exit(1)
-        if number < 255:
-            print("Here is number: " + str(number))
-            magic_number = abs(number - 256)
-            print("index: " + str(index))
-            magic_index = index
-            break
-    split_ip = ip.split(".")
-    result = int(split_ip[magic_index]) // magic_number
-    result2 = int(result * magic_number)
-    octet = result2 + magic_number - 1
-    min_ip = "192.168.1.1"
-    max_ip = "192.168.1.1"
-    if magic_index == 2:
-        min_ip = split_ip[0] + "." + split_ip[1] + "." + str(result2) + ".0"
-        max_ip = split_ip[0] + "." + split_ip[1] + "." + str(octet) + ".255"
-    elif magic_index == 3:
-        min_ip = split_ip[0] + "." + split_ip[1] + "." + split_ip[2] + "." + str(result2)
-        max_ip = split_ip[0] + "." + split_ip[1] + "." + split_ip[2] + "." + str(octet)
-    elif magic_index == 1:
-        min_ip = split_ip[0] + "." + str(result2) + "." + split_ip[2] + "." + split_ip[3]
-        max_ip = split_ip[0] + "." + str(octet) + "." + split_ip[2] + "." + split_ip[3]
-    elif magic_index == 0:
-        min_ip = str(result2) + "." + split_ip[1] + "." + split_ip[2] + "." + split_ip[3]
-        max_ip = str(octet) + "." + split_ip[1] + "." + split_ip[2] + "." + split_ip[3]
-    else:
-        print("Oops, something went wrong! Exiting...")
-        sys.exit(1)
-    print("Min IP: " + min_ip)
-    print("Max IP: " + max_ip)
-    return min_ip, max_ip
-
-
 # Try to ping with a single packet to make sure that the target is up
 # Must run PyCharm as administrator to ensure this works
 def check_if_host_is_up(ip):
@@ -129,29 +85,49 @@ def scan_port(port, ip):
     conf.verb = 0
     # The sr1 command is how we will send our SYN packet (using the S flag), and we hope to receive a SYNACK back
     # If we do, the destination port is open
+    print("Running TCP scan...")
     synack_packet = sr1(IP(dst=ip) / TCP(sport=int(source_port), dport=int(port), flags="S"))
     received_flags = synack_packet.getlayer(TCP).flags
     send_rst_packet(int(source_port), int(port), ip)
+    if udp_scan(port, ip):
+        return True
     if synack_received(received_flags):
         return True
     else:
         return False
 
 
+def udp_scan(port, ip):
+    print("Running UDP scan...")
+    port = int(port)
+    result = sr1(IP(dst=ip) / UDP(sport=RandShort(), dport=port), verbose=0, timeout=3)
+    if result and result.haslayer(UDP):
+        return True
+    return False
+
+
 def conclude_scan(start_clock):
+    global final_report_string
     stop_clock = datetime.now()
     total_time = stop_clock - start_clock
     print("Finished scanning in " + str(total_time) + "!")
+    html_report = open("report.html", "w")
+    html_report.write(final_report_string)
+    html_report.close()
+    print("Data written to report.html!")
 
 
 def scan_single_port(port, ip):
+    global final_report_string
     check_if_host_is_up(ip)
     start_clock = datetime.now()
     print("Beginning scan for " + ip + "...")
     port_open = scan_port(port, ip)
     at_least_one_port_open = False
     if port_open:
-        print("Port " + str(port) + " is open on " + ip)
+        summary_open = "Port " + str(port) + " is open on " + ip
+        print(summary_open)
+        final_report_string += "\n<p>" + summary_open + "</p>"
         at_least_one_port_open = True
     if not at_least_one_port_open:
         print("No open ports found on " + ip + "!")
@@ -159,6 +135,7 @@ def scan_single_port(port, ip):
 
 
 def scan_ports_list(ports_list, ip):
+    global final_report_string
     check_if_host_is_up(ip)
     start_clock = datetime.now()
     print("Beginning scan for " + ip + "...")
@@ -166,7 +143,9 @@ def scan_ports_list(ports_list, ip):
     for port in ports_list:
         port_open = scan_port(port, ip)
         if port_open:
-            print("Port " + str(port) + " is open on " + ip)
+            summary_open = "Port " + str(port) + " is open on " + ip
+            print(summary_open)
+            final_report_string += "\n<p>" + summary_open + "</p>"
             at_least_one_port_open = True
     if not at_least_one_port_open:
         print("No open ports found on " + ip + "!")
@@ -174,6 +153,7 @@ def scan_ports_list(ports_list, ip):
 
 
 def scan_range_of_ports(min_port, max_port, ip):
+    global final_report_string
     check_if_host_is_up(ip)
     # Include the max_port with +1
     ports_list = range(int(min_port), int(max_port) + 1)
@@ -183,14 +163,72 @@ def scan_range_of_ports(min_port, max_port, ip):
     for port in ports_list:
         port_open = scan_port(port, ip)
         if port_open:
-            print("Port " + str(port) + " is open on " + ip)
+            summary_open = "Port " + str(port) + " is open on " + ip
+            print(summary_open)
+            final_report_string += "\n<p>" + summary_open + "</p>"
             at_least_one_port_open = True
     if not at_least_one_port_open:
         print("No open ports found on " + ip + "!")
     conclude_scan(start_clock)
 
 
+def gui_input():
+    print("GUI option selected! Launching GUI!")
+    layout = [[sg.Text("Enter the IP address and port(s)! Can also add subnet in CIDR notation")],
+              [sg.Text("IPs (Comma-Separated List)", size=(25, 1)), sg.InputText()],
+              [sg.Text("Ports (Comma-Separated List)", size=(25, 1)), sg.InputText()],
+              [sg.Checkbox("Run traceroute", default=True)],
+              [sg.Text("Optional: choose a file with newline-separated list of IPs"), sg.FileBrowse()],
+              [sg.Button("SCAN")]]
+    window = sg.Window("Port Scanner", layout)
+    while True:
+        event, values = window.read()
+        # Scan logic
+        if event == "SCAN":
+            ip_addresses = values[0]
+            ports_list = values[1]
+            should_run_traceroute = values[2]
+            if len(values) > 3 and 3 in values:
+                ip_file = values[3]
+                if path.exists(ip_file):
+                    read_file = ip_file.Read()
+                    for line in read_file:
+                        print("Line: " + line)
+            ip_addresses = ip_addresses.split(", ")
+            are_ips_valid = check_valid_ip(ip_addresses)
+            if not are_ips_valid:
+                sg.Popup("Oops! Invalid IPs! Please try again!")
+            else:
+                if should_run_traceroute:
+                    for ip in ip_addresses:
+                        traceroute(ip)
+                valid_ports = True
+                ports_list = ports_list.split(", ")
+                for port in ports_list:
+                    try:
+                        port = int(port)
+                    except ValueError:
+                        sg.Popup("Oops! Ports should be a number! Please try again!")
+                        valid_ports = False
+                        break
+                    if not is_valid_port(port):
+                        sg.Popup("Oops! Invalid port found! Please try again!")
+                        valid_ports = False
+                        break
+                if not valid_ports:
+                    break
+                else:
+                    for ip in ip_addresses:
+                        scan_ports_list(ports_list, ip)
+            break
+        elif event == sg.WIN_CLOSED:
+            break
+    window.close()
+
+
 def get_user_input():
+    global final_report_string
+    final_report_string += "<h1>Summary of Port Scan</h1>\n"
     # Use a try-catch loop to allow the user to CTRL+C and exit
     try:
         valid_ip = False
@@ -199,16 +237,8 @@ def get_user_input():
         while not valid_ip:
             ip_addresses = input(
                 "Enter comma-separated list of IPv4 Addresses that you want to scan, or a .txt file separated by "
-                "newlines, or s for subnet mask option with 255 prefix (for CIDR notation, just enter IP/number): ")
-            if ip_addresses.lower() == "s":
-                ip = input("Enter IP: ")
-                subnet_mask = input("Enter subnet in 255.x.x.x form only: ")
-                min_ip, max_ip = compute_host_range(ip, subnet_mask)
-                # Insert everything from min_ip to max_ip into ip_addresses
-                ip_addresses = [min_ip + "-" + max_ip]
-                temp_addresses = [min_ip, max_ip]
-                valid_ip = check_valid_ip(temp_addresses)
-            elif ".txt" in ip_addresses:
+                "newlines. Feel free to specify a subnet in CIDR notation: ")
+            if ".txt" in ip_addresses:
                 new_ips = []
                 print("Reading from file" + ip_addresses + "...")
                 try:
@@ -224,9 +254,21 @@ def get_user_input():
             else:
                 ip_addresses = ip_addresses.split(",")
                 valid_ip = check_valid_ip(ip_addresses)
-        # Single port, port range, multiple ports
+        # Traceroute option
+        traceroute_option_selected = False
+        while not traceroute_option_selected:
+            should_traceroute = input("Would you like to run traceroute on all IPs? Y/N ")
+            if should_traceroute.lower() == "y" or should_traceroute.lower() == "yes" or should_traceroute.lower() == "oui oui":
+                traceroute_option_selected = True
+                for ip_address in ip_addresses:
+                    traceroute(ip_address)
+            elif should_traceroute.lower() == "n" or should_traceroute.lower() == "no":
+                traceroute_option_selected = True
+            else:
+                print("Invalid option selected. Please try again!")
         valid_option = False
         port_option = "Default"
+        # Single port, port range, multiple ports
         while not valid_option:
             port_option = input("Enter S for single port, M for multiple ports, P for port range: ")
             port_option = port_option.lower()
@@ -286,4 +328,8 @@ def get_user_input():
 getLogger("scapy.runtime").setLevel(ERROR)
 print("Hello port scanner!")
 
-get_user_input()
+gui_or_cli = input("Welcome to the port scanner! Enter g for GUI, and anything else for CLI! ")
+if gui_or_cli.lower() == "g":
+    gui_input()
+else:
+    get_user_input()
